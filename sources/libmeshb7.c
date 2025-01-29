@@ -42,7 +42,9 @@
 #include <float.h>
 #include <math.h>
 #include <ctype.h>
+#ifndef __wasi__
 #include <setjmp.h>
+#endif
 #include <fcntl.h>
 
  
@@ -217,7 +219,9 @@ typedef struct
    int      dim, ver, mod, typ, cod, FilDes, FltSiz, SolTypSiz[5];
    int64_t  NexKwdPos, siz;
    size_t   pos;
+#ifndef __wasi__
    jmp_buf  err;
+#endif
    KwdSct   KwdTab[ GmfMaxKwd + 1 ];
    FILE     *hdl;
    int      *IntBuf;
@@ -505,25 +509,49 @@ static int64_t GetFilSiz(GmfMshSct *);
 /* Fscanf and fgets checking for errors                                       */
 /*----------------------------------------------------------------------------*/
 
+#ifndef __wasi__
 #define safe_fscanf(hdl, format, ptr, JmpErr) \
    do { \
       if( fscanf(hdl, format, ptr) != 1 ) \
          longjmp( JmpErr, -1); \
    } while(0)
+#else
+#define safe_fscanf(hdl, format, ptr, JmpErr) \
+   do { \
+      if( fscanf(hdl, format, ptr) != 1 ) \
+         abort(); \
+   } while(0)
+#endif
 
 
+#ifndef __wasi__
 #define safe_fgets(ptr, siz, hdl, JmpErr) \
    do { \
       if( fgets(ptr, siz, hdl) == NULL ) \
          longjmp( JmpErr, -2); \
    } while(0)
+#else
+#define safe_fgets(ptr, siz, hdl, JmpErr) \
+   do { \
+      if( fgets(ptr, siz, hdl) == NULL ) \
+         abort(); \
+   } while(0)
+#endif
 
 
+#ifndef __wasi__
 #define safe_fread(ptr, siz, nit, str, JmpErr) \
    do { \
       if( fread(ptr, siz, nit, str) != nit ) \
          longjmp( JmpErr, -3); \
    } while(0)
+#else
+#define safe_fread(ptr, siz, nit, str, JmpErr) \
+   do { \
+      if( fread(ptr, siz, nit, str) != nit ) \
+         abort(); \
+   } while(0)
+#endif
 
 
 /*----------------------------------------------------------------------------*/
@@ -547,6 +575,7 @@ int64_t GmfOpenMesh(const char *FilNam, int mod, ...)
 
    MshIdx = (int64_t)msh;
 
+#ifndef __wasi__
    // Save the current stack environment for longjmp
    if( (err = setjmp(msh->err)) != 0)
    {
@@ -570,6 +599,7 @@ int64_t GmfOpenMesh(const char *FilNam, int mod, ...)
    // Copy the FilNam into the structure
    if(strlen(FilNam) + 7 >= GmfStrSiz)
       longjmp(msh->err, -4);
+#endif
 
    strcpy(msh->FilNam, FilNam);
 
@@ -588,8 +618,10 @@ int64_t GmfOpenMesh(const char *FilNam, int mod, ...)
       msh->typ |= (Bin | SolFil);
    else if(strstr(msh->FilNam, ".sol"))
       msh->typ |= (Asc | SolFil);
+#ifndef __wasi__
    else
       longjmp(msh->err, -5);
+#endif
 
    // Open the file in the required mod and initialize the mesh structure
    if(msh->mod == GmfRead)
@@ -613,6 +645,7 @@ int64_t GmfOpenMesh(const char *FilNam, int mod, ...)
          // [Bruno] added binary flag (necessary under Windows)
          msh->FilDes = open(msh->FilNam, OPEN_READ_FLAGS, OPEN_READ_MODE);
 
+#ifndef __wasi__
          if(msh->FilDes <= 0)
             longjmp(msh->err, -6);
 
@@ -644,42 +677,53 @@ int64_t GmfOpenMesh(const char *FilNam, int mod, ...)
 
          if(KwdCod != GmfDimension)
             longjmp(msh->err, -12);
+#endif
 
          GetPos(msh);
          ScaWrd(msh, (unsigned char *)&msh->dim);
       }
       else
       {
+#ifndef __wasi__
          // Create the name string and open the file
          if(!(msh->hdl = fopen(msh->FilNam, "rb")))
             longjmp(msh->err, -13);
+#endif
 
          do
          {
             res = fscanf(msh->hdl, "%100s", str);
          }while( (res != EOF) && strcmp(str, "MeshVersionFormatted") );
 
+#ifndef __wasi__
          if(res == EOF)
             longjmp(msh->err, -14);
+#endif
 
          safe_fscanf(msh->hdl, "%d", &msh->ver, msh->err);
 
+#ifndef __wasi__
          if( (msh->ver < 1) || (msh->ver > 4) )
             longjmp(msh->err, -15);
+#endif
 
          do
          {
             res = fscanf(msh->hdl, "%100s", str);
          }while( (res != EOF) && strcmp(str, "Dimension") );
 
+#ifndef __wasi__
          if(res == EOF)
             longjmp(msh->err, -16);
+#endif
 
          safe_fscanf(msh->hdl, "%d", &msh->dim, msh->err);
       }
 
+#ifndef __wasi__
       if( (msh->dim != 2) && (msh->dim != 3) )
          longjmp(msh->err, -17);
+#endif
 
       (*PtrVer) = msh->ver;
       (*PtrDim) = msh->dim;
@@ -721,6 +765,7 @@ int64_t GmfOpenMesh(const char *FilNam, int mod, ...)
       msh->dim = va_arg(VarArg, int);
       va_end(VarArg);
 
+#ifndef __wasi__
       if( (msh->ver < 1) || (msh->ver > 4) )
          longjmp(msh->err, -18);
 
@@ -729,6 +774,7 @@ int64_t GmfOpenMesh(const char *FilNam, int mod, ...)
 
       if( (msh->dim != 2) && (msh->dim != 3) )
          longjmp(msh->err, -20);
+#endif
 
       // Set default real numbers size
       if(msh->ver == 1)
@@ -747,15 +793,21 @@ int64_t GmfOpenMesh(const char *FilNam, int mod, ...)
 #ifdef WITH_GMF_AIO
          msh->FilDes = open(msh->FilNam, OPEN_WRITE_FLAGS, OPEN_WRITE_MODE);
 
+#ifndef __wasi__
          if(msh->FilDes <= 0)
             longjmp(msh->err, -21);
+#endif
 #else
+#ifndef __wasi__
          if(!(msh->hdl = fopen(msh->FilNam, "wb")))
             longjmp(msh->err, -22);
 #endif
+#endif
       }
+#ifndef __wasi__
       else if(!(msh->hdl = fopen(msh->FilNam, "wb")))
          longjmp(msh->err, -23);
+#endif
 
 
       /*------------*/
@@ -1070,6 +1122,7 @@ int GmfGetLin(int64_t MshIdx, int KwdCod, ...)
    if( (KwdCod < 1) || (KwdCod > GmfMaxKwd) )
       return(0);
 
+#ifndef __wasi__
    // Save the current stack environment for longjmp
    if( (err = setjmp(msh->err)) != 0)
    {
@@ -1078,6 +1131,7 @@ int GmfGetLin(int64_t MshIdx, int KwdCod, ...)
 #endif
       return(0);
    }
+#endif
 
    // Start decoding the arguments
    va_start(VarArg, KwdCod);
@@ -1264,6 +1318,7 @@ int GmfSetLin(int64_t MshIdx, int KwdCod, ...)
    if( (KwdCod < 1) || (KwdCod > GmfMaxKwd) )
       return(0);
  
+#ifndef __wasi__
    // Save the current stack environment for longjmp
    // This is needed in RecBlk()
    if( (err = setjmp(msh->err)) != 0)
@@ -1283,6 +1338,7 @@ int GmfSetLin(int64_t MshIdx, int KwdCod, ...)
 #endif
       return(0);
    }
+#endif
 
    // Start decoding the arguments
    va_start(VarArg, KwdCod);
@@ -1500,6 +1556,7 @@ int GmfCpyLin(int64_t InpIdx, int64_t OutIdx, int KwdCod)
    GmfMshSct   *InpMsh = (GmfMshSct *)InpIdx, *OutMsh = (GmfMshSct *)OutIdx;
    KwdSct      *kwd = &InpMsh->KwdTab[ KwdCod ];
 
+#ifndef __wasi__
    // Save the current stack environment for longjmp
    if( (err = setjmp(InpMsh->err)) != 0)
    {
@@ -1508,6 +1565,7 @@ int GmfCpyLin(int64_t InpIdx, int64_t OutIdx, int KwdCod)
 #endif
       return(0);
    }
+#endif
 
    for(i=0;i<kwd->SolSiz;i++)
    {
@@ -1648,6 +1706,7 @@ int GmfGetBlock(  int64_t MshIdx, int KwdCod, int64_t BegIdx, int64_t EndIdx,
    struct      aiocb aio;
    char        *UsrArg = NULL;
 
+#ifndef __wasi__
    // Save the current stack environment for longjmp
    if( (err = setjmp(msh->err)) != 0)
    {
@@ -1662,6 +1721,7 @@ int GmfGetBlock(  int64_t MshIdx, int KwdCod, int64_t BegIdx, int64_t EndIdx,
 
       return(0);
    }
+#endif
 
    // Check mesh and keyword
    if( (KwdCod < 1) || (KwdCod > GmfMaxKwd) || !kwd->NmbLin )
@@ -1695,8 +1755,10 @@ int GmfGetBlock(  int64_t MshIdx, int KwdCod, int64_t BegIdx, int64_t EndIdx,
       UsrArg = va_arg(VarArg, void *);
    }
 
+#ifndef __wasi__
    if( (kwd->typ != RegKwd) && (kwd->typ != SolKwd) )
       longjmp(msh->err, -36);
+#endif
 
    // Read the first data type to select between list and table mode
    typ = va_arg(VarArg, int);
@@ -1851,12 +1913,14 @@ int GmfGetBlock(  int64_t MshIdx, int KwdCod, int64_t BegIdx, int64_t EndIdx,
    }
    else
    {
+#ifndef __wasi__
       // Allocate both front and back buffers
       if(!(BckBuf = malloc(BufSiz * LinSiz)))
          longjmp(msh->err, -37);
 
       if(!(FrtBuf = malloc(BufSiz * LinSiz)))
          longjmp(msh->err, -38);
+#endif
 
       // Setup the ansynchonous parameters
       memset(&aio, 0, sizeof(struct aiocb));
@@ -1883,6 +1947,7 @@ int GmfGetBlock(  int64_t MshIdx, int KwdCod, int64_t BegIdx, int64_t EndIdx,
             err = my_aio_error(&aio);
             ret = my_aio_return(&aio);
 
+#ifndef __wasi__
             if (err != 0) {
               printf (" Error at aio_error() : %s\n", strerror (err));
               longjmp(msh->err, -39);
@@ -1892,6 +1957,7 @@ int GmfGetBlock(  int64_t MshIdx, int KwdCod, int64_t BegIdx, int64_t EndIdx,
               printf(" Error at aio_return()\n");
               longjmp(msh->err, -40);
             }
+#endif
 
             // Increment the reading position
             aio.aio_offset += (size_t)aio.aio_nbytes;
@@ -1933,7 +1999,9 @@ int GmfGetBlock(  int64_t MshIdx, int KwdCod, int64_t BegIdx, int64_t EndIdx,
                printf("aio_offset = " INT64_T_FMT "\n",(int64_t)aio.aio_offset);
                printf("aio_nbytes = " INT64_T_FMT "\n",(int64_t)aio.aio_nbytes);
                printf("errno      = %d\n",errno);
+#ifndef __wasi__
                longjmp(msh->err, -41);
+#endif
             }
          }
 
@@ -2080,6 +2148,7 @@ int GmfSetBlock(  int64_t MshIdx, int KwdCod, int64_t BegIdx, int64_t EndIdx,
    struct      aiocb aio;
    char        *UsrArg = NULL;
 
+#ifndef __wasi__
    // Save the current stack environment for longjmp
    if( (err = setjmp(msh->err)) != 0)
    {
@@ -2091,6 +2160,7 @@ int GmfSetBlock(  int64_t MshIdx, int KwdCod, int64_t BegIdx, int64_t EndIdx,
 
       return(0);
    }
+#endif
 
    // Check mesh and keyword
    if( (KwdCod < 1) || (KwdCod > GmfMaxKwd) || !kwd->NmbLin )
@@ -2129,8 +2199,10 @@ int GmfSetBlock(  int64_t MshIdx, int KwdCod, int64_t BegIdx, int64_t EndIdx,
       UsrArg = va_arg(VarArg, void *);
    }
 
+#ifndef __wasi__
    if( (kwd->typ != RegKwd) && (kwd->typ != SolKwd) )
       longjmp(msh->err, -42);
+#endif
 
    // Read the first data type to select between list and table mode
    typ = va_arg(VarArg, int);
@@ -2290,12 +2362,14 @@ int GmfSetBlock(  int64_t MshIdx, int KwdCod, int64_t BegIdx, int64_t EndIdx,
    }
    else
    {
+#ifndef __wasi__
       // Allocate the front and back buffers
       if(!(BckBuf = malloc(BufSiz * LinSiz)))
          longjmp(msh->err, -43);
 
       if(!(FrtBuf = malloc(BufSiz * LinSiz)))
          longjmp(msh->err, -44);
+#endif
 
       // Setup the asynchronous parameters
       memset(&aio, 0, sizeof(struct aiocb));
@@ -2329,7 +2403,9 @@ int GmfSetBlock(  int64_t MshIdx, int KwdCod, int64_t BegIdx, int64_t EndIdx,
                printf("aio_offset = " INT64_T_FMT "\n",(int64_t)aio.aio_offset);
                printf("aio_nbytes = " INT64_T_FMT "\n",(int64_t)aio.aio_nbytes);
                printf("errno      = %d\n",errno);
+#ifndef __wasi__
                longjmp(msh->err, -45);
+#endif
             }
          }
 
@@ -2438,6 +2514,7 @@ int GmfSetBlock(  int64_t MshIdx, int KwdCod, int64_t BegIdx, int64_t EndIdx,
             err = my_aio_error(&aio);
             ret = my_aio_return(&aio);
 
+#ifndef __wasi__
             if (err != 0) {
               printf (" Error at aio_error() : %s\n", strerror (err));
               longjmp(msh->err, -46);
@@ -2447,6 +2524,7 @@ int GmfSetBlock(  int64_t MshIdx, int KwdCod, int64_t BegIdx, int64_t EndIdx,
               printf(" Error at aio_return()\n");
               longjmp(msh->err, -47);
             }
+#endif
 
             // Move the write position
             aio.aio_offset += (size_t)aio.aio_nbytes;
@@ -2736,6 +2814,7 @@ static int ScaKwdTab(GmfMshSct *msh)
          ScaWrd(msh, ( char *)&KwdCod);
          NexPos = GetPos(msh);
 
+#ifndef __wasi__
          // Make sure the flow does not move beyond the file size
          if(NexPos > EndPos)
             longjmp(msh->err, -24);
@@ -2743,6 +2822,7 @@ static int ScaKwdTab(GmfMshSct *msh)
          // And check that it does not move back
          if(NexPos && (NexPos <= LstPos))
             longjmp(msh->err, -30);
+#endif
 
          LstPos = NexPos;
 
@@ -2750,9 +2830,11 @@ static int ScaKwdTab(GmfMshSct *msh)
          if( (KwdCod >= 1) && (KwdCod <= GmfMaxKwd) )
             ScaKwdHdr(msh, KwdCod);
 
+#ifndef __wasi__
          // Go to the next kwd
          if(NexPos && !(SetFilPos(msh, NexPos)))
             longjmp(msh->err, -25);
+#endif
 
       }while(NexPos && (KwdCod != GmfEnd));
    }
@@ -2932,12 +3014,14 @@ static void ExpFmt(GmfMshSct *msh, int KwdCod)
 
 static void ScaWrd(GmfMshSct *msh, void *ptr)
 {
+#ifndef __wasi__
 #ifdef WITH_GMF_AIO
    if(read(msh->FilDes, ptr, WrdSiz) != WrdSiz)
 #else
    if(fread(ptr, WrdSiz, 1, msh->hdl) != 1)
 #endif
       longjmp(msh->err, -26);
+#endif
 
    if(msh->cod != 1)
       SwpWrd((char *)ptr, WrdSiz);
@@ -2950,12 +3034,14 @@ static void ScaWrd(GmfMshSct *msh, void *ptr)
 
 static void ScaDblWrd(GmfMshSct *msh, void *ptr)
 {
+#ifndef __wasi__
 #ifdef WITH_GMF_AIO
    if(read(msh->FilDes, ptr, WrdSiz * 2) != WrdSiz * 2)
 #else
    if( fread(ptr, WrdSiz, 2, msh->hdl) != 2 )
 #endif
       longjmp(msh->err, -27);
+#endif
 
    if(msh->cod != 1)
       SwpWrd((char *)ptr, 2 * WrdSiz);
@@ -2989,6 +3075,7 @@ static int64_t GetPos(GmfMshSct *msh)
 
 static void RecWrd(GmfMshSct *msh, const void *wrd)
 {
+#ifndef __wasi__
    // [Bruno] added error control
 #ifdef WITH_GMF_AIO
    if(write(msh->FilDes, wrd, WrdSiz) != WrdSiz)
@@ -2996,6 +3083,7 @@ static void RecWrd(GmfMshSct *msh, const void *wrd)
    if(fwrite(wrd, WrdSiz, 1, msh->hdl) != 1)
 #endif
       longjmp(msh->err,-28);
+#endif
 }
 
 
@@ -3005,6 +3093,7 @@ static void RecWrd(GmfMshSct *msh, const void *wrd)
 
 static void RecDblWrd(GmfMshSct *msh, const void *wrd)
 {
+#ifndef __wasi__
    // [Bruno] added error control
 #ifdef WITH_GMF_AIO
    if(write(msh->FilDes, wrd, WrdSiz * 2) != WrdSiz*2)
@@ -3012,6 +3101,7 @@ static void RecDblWrd(GmfMshSct *msh, const void *wrd)
    if(fwrite(wrd, WrdSiz, 2, msh->hdl) != 2)
 #endif
       longjmp(msh->err,-29);
+#endif
 }
 
 
@@ -3044,6 +3134,7 @@ static void RecBlk(GmfMshSct *msh, const void *blk, int siz)
        * the cache size is 10000 words, this is much much smaller than 4Gb
        * so there is probably no problem.
        */
+#ifndef __wasi__
 #ifdef WITH_GMF_AIO
       if(write(msh->FilDes, msh->blk, (int)msh->pos) != (ssize_t)msh->pos)
 #else      
@@ -3057,6 +3148,7 @@ static void RecBlk(GmfMshSct *msh, const void *blk, int siz)
       if(fwrite(msh->blk, 1, msh->pos, msh->hdl) != msh->pos)
 #endif      
          longjmp(msh->err, -31);
+#endif
 #endif      
       msh->pos = 0;
    }
@@ -3150,26 +3242,34 @@ static int64_t GetFilSiz(GmfMshSct *msh)
 #else
       CurPos = MYFTELL(msh->hdl);
 
+#ifndef __wasi__
       if(MYFSEEK(msh->hdl, 0, SEEK_END) != 0)
          longjmp(msh->err, -32);
+#endif
 
       EndPos = MYFTELL(msh->hdl);
 
+#ifndef __wasi__
       if(MYFSEEK(msh->hdl, (size_t)CurPos, SEEK_SET) != 0)
          longjmp(msh->err, -33);
+#endif
 #endif
    }
    else
    {
       CurPos = MYFTELL(msh->hdl);
 
+#ifndef __wasi__
       if(MYFSEEK(msh->hdl, 0, SEEK_END) != 0)
          longjmp(msh->err, -34);
+#endif
 
       EndPos = MYFTELL(msh->hdl);
 
+#ifndef __wasi__
       if(MYFSEEK(msh->hdl, (size_t)CurPos, SEEK_SET) != 0)
          longjmp(msh->err, -35);
+#endif
    }
 
    return(EndPos);
